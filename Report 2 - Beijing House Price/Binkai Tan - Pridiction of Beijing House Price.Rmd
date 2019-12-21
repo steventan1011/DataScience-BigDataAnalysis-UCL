@@ -1,0 +1,627 @@
+---
+title: "Prediction on Beijing House Price"
+---
+*Binkai Tan*
+
+## 0. Introduction
+### Context & Data Set
+Previous work on the House Price data set is mostly to predict the house price by Linear Regression, whereas, we focus more on how to fit the model by tree-based approaches or SVM method.
+Firstly, this is the description of our data set.
+
+
+| Name              | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| price             | The price of houses per $m^2$ in Beijing (RMB)               |
+| price_class       | A tertiary factor containing the range of the price. (A="0<price<50000", B="50000<price<100000", C="100000<price<150000") |
+| district          | The district of the house in Beijing. £¨east="Dongcheng+Chaoyang", west="Xicheng+Haidian", suburban=Others) |
+| age               | The age of the house                                         |
+| trade_num         | The number of traded houses in the last 1month at the area of a circle with a radius of 1 kilometers(the following are the same) |
+| house_num         | The number of houses in the area. (the "area" represents for a circle with a radius of 1 kilometers) |
+| building_num      | The number of the buildings in the area.                     |
+| bus_num           | The number of bus stops in the area.                         |
+| subway_num        | The number of subway stations in the area.                   |
+| office_num        | The number of offices in the area.                           |
+| mall_num          | The number of malls in the area.                             |
+| restaurant_num    | The number of restaurants in the area.                       |
+| bank_num          | The number of banks in the area.                             |
+| market_num        | The number of markets in the area.                           |
+| entertainment_num | The number of entertainments in the area.                    |
+| hospital_num      | The number of hospitals in the area.                         |
+| park_num          | The number of parks in the area.                             |
+| service_cost      | The cost of the service for the house.                       |
+| volume_fraction   | The ratio of the volume to fraction.                         |
+
+
+### Overview of our work
+Based on the BJHouse data set, we are supposed to find out an optimal model to predict the price of Beijing House per $m^2$ and validate it. During the process, I firstly loaded the data set and split it into training and test data sets, using graphs to explore the variables which may be suitable for predicting. Then, I performed a Desition Tree (which is a classification problem) based on the predict_class and calculated the misclassification rate as the indicator of model performance.  
+Furthermore, I used the regreesion tree to fit the data in a regression model, calculating the MSE in log likelyhood (because the raw MSE are too large to record). Thirdly, we tried Random Forest on the data set and it performed pretty well, explaining which variables have a great contribution.  
+Moreover, we tried the Linear Regression method, doing cross validating on the number of variables to fit in an optimal model. Comparing with it, we then made use of the SVM to train the data, and 
+got a propriate cost value by cross validating.  
+Last but no least, we compared the MSEs in log likelihood with different models, getting the best model for our data set to predict the house price in Beijing.
+
+## 1. Loading data and Drawing Figures
+### 1.1 Scrapying and loading the data
+
+
+In this section, we load the data which was crawled from the Internet (the url is: http://www.fang.com/)  
+We cut the price into 3 parts: A="0<price<50000", B="50000<price<100000", C="100000<price<150000" Build a new column as price_class and omit the "NA" samples. 
+```{r}
+# load data
+BJHouse <- read.csv("C:/Users/steve/Desktop/Dataset_filter.csv")
+BJHouse$price_class <- cut(BJHouse$price,breaks=c(0,50000,100000,150000),labels=c('A','B','C'))
+BJHouse$price_class <- as.factor(BJHouse$price_class)
+BJHouse$district <- as.factor(BJHouse$district)
+BJHouse <- na.omit(BJHouse)
+set.seed(1)
+```
+
+### 1.2 Pie chart for the relation between price_class and district
+1) The following pie charts display the relationship between price_class and the district of the house. As is shown beneath, when the price is lower than 50000, 86.64% of the houses are located in suburban area, and just 1.63% are locates in the west urban area, which explains most houses are located in suburban area if the price is lower than 50000.
+```{r}
+library(ggplot2)
+library(gridExtra)
+#install.packages("devtools")
+# piechart-A
+dataA <- subset(BJHouse, price_class=="A")
+dtA = data.frame(A = c(length(subset(dataA, district=="east")$price), length(subset(dataA, district=="west")$price), length(subset(dataA, district=="suburban")$price)), District = c("east","west","suburban"))
+dtA = dtA[order(dtA$A, decreasing = TRUE),]
+myLabel = as.vector(dtA$District)
+myLabel = paste(myLabel, "(", round(dtA$A / sum(dtA$A) * 100, 2), "%)", sep = "")  
+pA = ggplot(dtA, aes(x = "", y = A, fill = District)) +   geom_bar(stat = "identity") + 
+  coord_polar(theta = "y")  + labs(x = "", y = "", title = "District Distribution at Price Level A(0 < price < 50000)")   + theme(axis.ticks = element_blank()) + labs( caption = "figure 1-1                                                 ")+
+  scale_fill_discrete(breaks = dtA$District, labels = myLabel)
+pA
+```
+
+
+2) Figure 1-2 shows the district distribution at price level B, which is at (50000, 100000). Half of the houses are located in the east urban area, while 29.48% are in the west and 20.96% are in the suburb, which hints there are more middle class family living in the east urban area than other districts.
+```{r}
+# piechart-B
+dataB <- subset(BJHouse, price_class=="B")
+dtB = data.frame(A = c(length(subset(dataB, district=="east")$price), length(subset(dataB, district=="west")$price), length(subset(dataB, district=="suburban")$price)), District= c("east","west","suburban"))
+dtB = dtB[order(dtB$A, decreasing = TRUE),]
+myLabel = as.vector(dtB$District)
+myLabel = paste(myLabel, "(", round(dtB$A / sum(dtB$A) * 100, 2), "%)", sep = "")  
+pB = ggplot(dtB, aes(x = "", y = A, fill = District)) +   geom_bar(stat = "identity") + 
+  coord_polar(theta = "y")   + labs(x = "", y = "", title = "District Distribution at Price Level B(50000 < price < 100000)")  + theme(axis.ticks = element_blank()) +labs( caption = "figure 1-2                                                   ")+
+  scale_fill_discrete(breaks = dtB$District, labels = myLabel)
+pB
+
+```
+
+3) Figure 1-3 showing beneath indicates almost all houses are located in the east and west urban areas when the price climbs over 100000, most of which are in the west. It shows that west urban area may be the richest part of Beijing.
+```{r}
+# piechart-C
+dataC <- subset(BJHouse, price_class=="C")
+dtC = data.frame(A = c(length(subset(dataC, district=="east")$price), length(subset(dataC, district=="west")$price), length(subset(dataC, district=="suburban")$price)), District = c("east","west","suburban"))
+dtC = dtC[order(dtC$A, decreasing = TRUE),]
+myLabel = as.vector(dtC$District)
+myLabel = paste(myLabel, "(", round(dtC$A / sum(dtC$A) * 100, 2), "%)", sep = "") 
+pC = ggplot(dtC, aes(x = "", y = A, fill = District)) +   geom_bar(stat = "identity") + 
+  coord_polar(theta = "y")   + labs(x = "", y = "", title = "District Distribution at Price Level C(100000 < price < 150000)")+ theme(axis.ticks = element_blank()) +labs( caption = "figure 1-3                                                   ")+   scale_fill_discrete(breaks = dtC$B, labels = myLabel)
+pC
+```
+
+### 1.3 Boxplot for variables with price_class
+
+Figure 1-4 and 1-5 show two varables, which are "office_num" and "bank_num", have a positive relationship with the "price_class". It is obvious that if the offices and banks are much more, the area will have more employment opportunities, which is significant to the demanding of houses. As a result, the house price will become higher.  
+Whereas, figure 1-6 and 1-7 indicates two variables which are negative to the "price_class". The number of markets and bus stops may have a reverse effect on the house price. It may need further research to expain this phenomenon.
+```{r}
+#ggplot(BJHouse, aes(x=office_num,y=price)) + geom_point(size=3,shape=21)
+  # positve
+g1<-ggplot(data=BJHouse, aes(x=price_class,y=office_num))+geom_boxplot(aes(fill=price_class))+labs(caption="figure 1-4                       ")
+g2<-ggplot(data=BJHouse, aes(x=price_class,y=bank_num))+geom_boxplot(aes(fill=price_class))+labs(caption="figure 1-5                       ")
+  # negative
+g3<-ggplot(data=BJHouse, aes(x=price_class,y=market_num))+geom_boxplot(aes(fill=price_class))+labs(caption="figure 1-6                       ")
+g4<-ggplot(data=BJHouse, aes(x=price_class,y=bus_num))+geom_boxplot(aes(fill=price_class))+labs(caption="figure 1-7                       ")
+
+grid.arrange(g1,g2,g3,g4, ncol=2)
+```
+
+
+
+
+
+
+
+## 2. Tree based models
+### 2.1 Decision Tree 
+1) Firstly, we use the decision tree to classify the price_class of the data set. Having Loaded the packages, we split the data into training and test data on 1:1. Use the tree() function to fit the model and plot it as figure 2-1. If the condition is satisfied on the node, it will go to the left branch, otherwise it will go to the right. For example, if the test house is in the east or west district, then we judge the market_num of it. If it is greater than 85, then check the bank_num... 
+```{r}
+# tree
+library(tree)
+# test tree
+train = sample(1:nrow(BJHouse), 0.5*nrow(BJHouse))
+BJHouse.train = BJHouse[train, ]
+BJHouse.test = BJHouse[-train, ]
+tree.BJHouse = tree(price_class~.-price, BJHouse.train, subset = train)
+plot(tree.BJHouse)
+text(tree.BJHouse, pretty=0)
+```
+figure 2-1  The raw decision tree
+  
+  
+
+
+2) Then we predict it with the test data, and calculate the misclassification rate of it, which is 170/784 = 21.68%
+```{r}
+tree.pred = predict(tree.BJHouse, BJHouse.test, type="class")
+table(tree.pred, BJHouse.test$price_class)
+```
+
+
+3) Next, we use the cv.tree() function to cross validate the model. As is shown on the figure 2-2 and 2-3, the best value of the tree size is 5.
+```{r}
+# pruneed tree
+cvtree.BJHouse = cv.tree(tree.BJHouse, FUN=prune.misclass)
+par(mfrow=c(1,2))
+plot(cvtree.BJHouse$size, cvtree.BJHouse$dev, xlab="size",
+     ylab = "Error", 
+     type="b",
+     main="Error with tree size",
+     sub = "figure 2-2")
+plot(cvtree.BJHouse$k, cvtree.BJHouse$dev,xlab ="k",
+     ylab = "Error", 
+     type="b",
+     main="Error with k",
+     sub = "figure 2-3")
+```
+
+4) Furthermore, we prune the tree with "best = 5", drawing the tree plot as figure 2-4. It is much clear and more simple to look than the former one. For example when the house is located in the urban area and the bumber of markets is higher than 85, the price of it may between 50000 and 100000.
+```{r}
+par(mfrow=c(1,1))
+prune.BJHouse =prune.misclass(tree.BJHouse ,best=5)
+plot(prune.BJHouse,
+     main="pruned tree",
+     sub = "figure 2-4")
+text(prune.BJHouse ,pretty=0)
+
+```
+figure 2-4  The pruned decision tree
+  
+  
+
+5) This table shows the misclassification rate = 154/784 = 19.64%, which is lower than the raw tree's. As a result, the performance of the pruend tree is better.
+```{r}
+tree.pred=predict(prune.BJHouse, BJHouse.test, type="class")
+table(tree.pred,BJHouse.test$price_class)
+```
+
+
+
+### 2.2 Regression Tree 
+1) Here we use the regression tree to fit the model with the continuous variable price (not price class). Figure 2-5 shows the regrssion tree for Beijing house price. The log(MSE) of the raw tree is 19.19593.
+```{r}
+# regression tree
+regtree.BJHouse = tree(price~.-price_class, 
+                       BJHouse.train,
+                       subset = train)
+summary(regtree.BJHouse)
+plot(regtree.BJHouse,
+     main = "regression tree",
+     sub = "figure 2-5")
+text(regtree.BJHouse, pretty=0)
+yhat <- predict(regtree.BJHouse, BJHouse.test)
+MSE.reg <- mean((yhat-BJHouse.test$price)^2)
+log(MSE.reg)
+```
+figure 2-5 The raw regression tree
+
+
+2) Then do the cross validating. As is shown beneath, the best size is 12.
+```{r}
+cvregtree.BJHouse = cv.tree(regtree.BJHouse)
+plot(cvregtree.BJHouse$size, cvregtree.BJHouse$dev, xlab="size",
+     ylab="error",
+     type = "b",
+     sub="figure 2-6", 
+     main="Error with tree size")
+
+```
+
+
+3) Prune it using the best size of 12. The tree is plotted as the figure 2-7.
+```{r}
+regprune.BJHouse = prune.tree(regtree.BJHouse, best = 12)
+plot(regprune.BJHouse,main="figure 2-7")
+text(regprune.BJHouse, pretty = 0)
+```
+figure 2-7 The pruned regression tree 
+
+4) In keeping with the cross-validation results, we use the pruned tree to make predictions on the test set. The log(MSE) is 19.19593, which is equal to the raw tree performed.(I think it maybe because the effect of random seed or the data set, which need further research) Figure 2-8 shows the Q-Q plot of the regression tree model, which have a good performance.
+```{r}
+yhat = predict(regprune.BJHouse, newdata = BJHouse.test)
+BJHouse.regtest = BJHouse[-train, "price"]
+plot(yhat, BJHouse.regtest,
+     ylab = "regression_price",
+     main = "Comparison of yhat and price of regression",
+     sub="figure 2-8")
+abline(0,1)
+MSE.reg <- mean((yhat-BJHouse.test$price)^2)
+log(MSE.reg)
+```
+
+
+### 2.3 Random Forest
+As the total variables p = 17, we perform two models in Random Forest with different "mtry" as 4 (sqrt(p)) and 8 (p/2).
+#### 2.3.1 mtry = 4
+1) Using the Random Forest model to fit in the data, we can plot figure 2-9 as the error plot with different trees. As is shown, the optimal number of trees is 200.
+```{r}
+# random forest
+library(randomForest)
+# p = 17
+# 1. m = sqrt(p) = 4
+rf.BJHouse = randomForest(price~.-price_class, BJHouse.train, mtry=4, importance = TRUE, ntree=1000)
+rf.BJHouse
+rf.pred = predict(rf.BJHouse, BJHouse.test)
+# table(rf.pred, BJHouse.test$price_class)
+plot(rf.BJHouse,sub="figure 2-9")
+```
+
+2) Making use of the importance() and varImpPlot() functions, we can get the plot shown beneath. It indicates that the variable "district" contributes the most to the model, following with "office_num".
+```{r}
+importance(rf.BJHouse)
+varImpPlot(rf.BJHouse,sub = "figure 2-10")
+```
+figure 2-10 The importance of each variables (m = 4)
+
+
+3) Plotting the Q-Q plot as figure 2-11, we can see the points are basically near the y=x line. The log(MSE) of this model is 18.66149.
+```{r}
+plot(rf.pred, BJHouse.test$price
+     ,sub="figure 2-11"
+     ,main = "Comparison of data and prediction model"
+     ,xlab = "predicted_price"
+     ,ylab = "test_price"
+     )
+abline(0,1)
+MSE.rf <- mean((rf.pred-BJHouse.test$price)^2)
+log(MSE.rf)
+```
+
+
+
+#### 2.3.2 mtry = 8
+1) Using the Random Forest model to fit in the data, we can plot figure 2-12 as the error plot with different trees. As is shown, the optimal number of trees is 100.
+```{r}
+# 2. m = p/2 = 8
+rf.BJHouse = randomForest(price~.-price_class, BJHouse.train, mtry=8, importance = TRUE, ntree=1000)
+rf.BJHouse
+rf.pred = predict(rf.BJHouse, BJHouse.test)
+# table(rf.pred, BJHouse.test$price_class)
+plot(rf.BJHouse
+     ,sub="figure 2-12"
+     ,main = "Error with tree number")
+```
+
+2) Making use of the importance() and varImpPlot() functions, we can get the plot shown beneath. It indicates that the variable "district" contributes the most to the model, following with "office_num".
+```{r}
+importance(rf.BJHouse)
+varImpPlot(rf.BJHouse, sub="figure 2-13")
+```
+figure 2-13 The importance of each variables (m = 8)
+
+
+3) Plotting the Q-Q plot as figure 2-11, we can see when the price are lower than 6000, the points are basically near the y=x line, but when it grows, the residual is also growing at the same time. The log(MSE) of this model is 18.64323.
+```{r}
+plot(rf.pred, BJHouse.test$price
+     ,sub="figure 2-11"
+     ,main = "Comparison of data and prediction model"
+     ,xlab = "predicted_price"
+     ,ylab = "test_price"
+     )
+abline(0,1)
+MSE.rf <- mean((rf.pred-BJHouse.test$price)^2)
+log(MSE.rf)
+```
+
+## 3. Linear Regression Model
+1) First load the packages and data set.
+```{r}
+library(leaps)
+library(nnet)
+library(ipred)
+
+# Load the data
+# WARNING: THIS PART OF THE CODE SHOULD NOT BE COPIED INTO THE MAIN PROJECT.
+
+BJHouse <- read.csv("C:/Users/steve/Desktop/Dataset_filter.csv")
+new = class.ind(as.factor(BJHouse$district))
+BJHouse$west = new[, 1]
+BJHouse$suburban = new[, 2]
+BJHouse = subset(BJHouse, select=-district)
+test_rows = sample(1: 1568, 784)
+BJHouse.test = BJHouse[test_rows, ]
+BJHouse.train = BJHouse[-test_rows, ]
+```
+
+2) Cross validating the model. Write a for loop to find each best combination of 1~17 variables, using "paste0()" to combine the strings. Then cross validating the 17 MSEs corresponding to the models, find out the best one.
+```{r}
+# nvmax = 15
+mdl = regsubsets(
+    price ~ .,
+    data = BJHouse.train,
+    nbest = 1,
+    nvmax = NULL,
+    force.in = NULL, force.out = NULL,
+    method = 'exhaustive'
+)
+cur = 2
+f = c()
+for (i in seq(1, length(mdl$xnames) - 1))
+{
+    fm = mdl$xnames[mdl$lopt[cur + 1]]
+    cur = cur + 2
+    if (i >= 2)
+    {
+        for (j in seq(2, i))
+        {
+          fm = paste0(c(fm, mdl$xnames[mdl$lopt[cur]]), collapse="+")
+          cur = cur + 1
+        }
+    }
+    f = c(f, paste0(c("price", fm), collapse="~"))
+}
+# Calculate MSE for different cost value of LibSVM.
+mses = c()
+for (i in seq(1, length(f)))
+{
+    err = errorest(as.formula(f[i]), data = BJHouse.train, model=lm, est.para=control.errorest(random=FALSE))
+    mses = c(mses, log(err$error ^ 2))
+}
+# Draw the plot.
+plot(1: length(f), mses
+     , type='b'
+     ,xlab = "number of variable"
+     ,main = "mses with number of variables"
+     ,sub = "figure 3-1")
+```
+  
+As figure 3-1 shows, the best combination is using 10 variables (with the lowest MSE). 
+
+
+
+
+3) Draw the Q-Q plot of the model, in which many points are dispersed from the y=x line. The log(MSE) is 19.51165.
+```{r}
+index = which.min(mses)
+mdl <- lm(as.formula(f[index]), BJHouse.train)
+prediction <- predict(mdl, BJHouse.test)
+err = errorest(as.formula(f[index]), data = BJHouse.test, model=lm, est.para=control.errorest(random=FALSE))
+log(err$error ^ 2)
+
+plot(prediction~BJHouse.test$price, 
+     xlab="Actual", 
+     ylab="Prediction",
+     sub = "figure 3-2",
+     main="Comparison of Prediction and Actual")
+abline(0,1)
+```
+
+
+
+
+## 4. SVM Model
+1) Load the package and data set, and split it into training and test data.
+```{r}
+library(e1071)
+# Load the data
+# WARNING: THIS PART OF THE CODE SHOULD NOT BE COPIED INTO THE MAIN PROJECT.
+BJHouse <- read.csv("C:/Users/steve/Desktop/Dataset_filter.csv")
+test_rows = sample(1: 1568, 784)
+BJHouse.test = BJHouse[test_rows, ]
+BJHouse.train = BJHouse[-test_rows, ]
+```
+
+
+
+2) Cross validating the model to fit the optimal parameter "cost" parameter of the svm() function, here we use cost = 2^i to check each model. The plot's x = log2(cost). It shows that the optimal i is 3, therefore the best "cost" is 2^3=8. 
+```{r}
+# Calculate MSE for different cost value of LibSVM.
+mses = c()
+for (i in seq(0, 9))
+{
+    mdl = svm(price ~.,data = BJHouse.train,kernel = "radial",cost = 2 ^ i, gamma = 1/ncol(BJHouse.train), cross=10)
+    mses = c(mses, log(mdl$tot.MSE))
+}
+# Draw the plot.
+plot(0: 9, mses, type='b'
+     ,xlab = "exponent of cost"
+     ,sub = "figure 3-3"
+     ,main = "Cost of Constraints Violation")
+# Cost = 8 can bring the best result.
+```
+
+
+
+3) Then calculate the residual for test data, the log(MSE) of this model is 18.992. Plot the Q-Q plot, we can see when the price are lower than 6000, the points are basically near the y=x line, but when it grows, the residual is also growing at the same time.
+```{r}
+# Calculate the residual for test dataset.
+mdl = svm(price ~.,data = BJHouse.train,kernel = "radial",cost = 8, gamma = 1/ncol(BJHouse.train))
+prediction <- predict(mdl, BJHouse.test)
+residual = log(mean((prediction - BJHouse.test$price) ^ 2))
+residual
+plot(prediction~BJHouse.test$price,
+     xlab="Actual",
+     ylab="Prediction",
+     sub = "figure 3-4",
+     main = "Comparison of Prediction and Actual")
+abline(0,1)
+
+```
+
+
+
+## 5. Summary
+
+1) As is performed above, the optimal model in this work is Random Forest (mtry = 8), with the lowest log(MSE) = 18.64323. 
+
+| Model                    | log(MSE) |
+| ------------------------ | -------- |
+| Row Regression Tree      | 19.19593 |
+| Pruned Regression Tree   | 19.19593 |
+| Random Forest (mtry = 4) | 18.66149 |
+| Random Forest (mtry = 8) | 18.64323 |
+| Linear Regression        | 19.51165 |
+| SVM                      | 18.99220 |  
+
+
+2) In the process ananysing the data, we used decision tree on both classification and regression, comparing the raw and pruned tree of each. Then we tried 2 random forests model with the m in 4 and 8. Later, we compared it with linear regression and SVM. As the table shows, linear regression model has the highest MSE in these models of the data set, following the regression tree. To optimize the model we tried SVM and random forest, which shows random forest has a better performance.  
+It can be suggested to predict the Beijing house price by the RF model, if the independent variables are given. 
+  
+
+3) Further study of this work may contain optimization of the random forest model and to fit in the situation if some variables lack. 
+
+## 6. Appendix
+Here is the python code to scrapy the Beijing House Price data set.
+```
+# -*- encoding: utf-8 -*-
+
+__author__ = "Eshttc_Cty"
+
+import multiprocessing
+import re
+import bs4
+import requests
+
+
+def download_data(url):
+    res = []
+    r = requests.get(url)
+    html = bs4.BeautifulSoup(r.text, "html.parser")
+    houses = html.findAll("div", {"class": "bkyellow"})
+    for house in houses:
+        try:
+            title = house.findAll("span", {"class": "housetitle"})[0].a.get_text().strip()
+            if title.endswith(u"ÐÂ·¿"):
+                continue
+            print(title)
+            a = house.findAll("dd", {"class": "money mt30"})[0].p.a
+            nxt_url = a.attrs["href"].strip()
+            print(nxt_url)
+            if not nxt_url.endswith(".htm"):
+                continue
+            price = a.span.get_text().strip()
+            res.append([title, price, nxt_url])
+        except:
+            raise
+    return res
+
+
+def handle(lst):
+    url = lst.pop()
+    r = requests.get(host + url)
+    html = bs4.BeautifulSoup(r.text, "html.parser")
+    lst.append(html.findAll("p", {"class": "location"})[0].contents[0].strip())
+    lst.append(str(html.findAll("div", {"class": "content_ass clearfix"})[0].findAll("li")[3].contents[1]))
+    nxt_url = html.findAll("a", {"id": "pcxqfangjia_B02_01"})[0].attrs["href"]
+    print("Step 1 Done.")
+    r = requests.get(nxt_url)
+    html = bs4.BeautifulSoup(r.text.encode('iso-8859-1').decode('gbk'), "html.parser")
+    li = html.findAll("div", {"class": "Rinfolist"})[0].ul.findAll("li")[: 7]
+    for l in li:
+        try:
+            lst.append(l.contents[1].get_text())
+        except:
+            lst.append(str(l.contents[1]))
+    print("Step 2 Done.")
+    r = requests.get(nxt_url + "/pingji/")
+    print("Requested.")
+    html = bs4.BeautifulSoup(r.text, "html.parser")
+    print("Parsed.")
+    spans = html.findAll("ol", {"class": "wypj"})[0].findAll("span", {"class": "f16"})
+    for s in spans:
+        lst.append(s.contents[1].get_text())
+    spans = html.findAll("ul", {"class": "bk_pj_con ovl"})[0].findAll("span", {"class": "f16"})
+    for s in spans:
+        lst.append(s.contents[2].get_text())
+    li = html.findAll("ul", {"class": "area_qypt"})[0].findAll("li")
+    for l in li:
+        lst.append(l.p.get_text().split(" ")[1])
+    print("Step 3 Done.")
+    print(lst)
+    return
+        
+
+def worker(q, q1):
+    print("Ready to Work.")
+    while True:
+        p = q.get()
+        if p is None:
+            break
+        try:
+            handle(p)
+            q1.put(p)
+        except:
+            pass
+    print("That's it, I am dead.")
+    return
+
+
+if __name__ == "__main__":
+    m = multiprocessing.Manager()
+    q, q1= m.Queue(), m.Queue()
+    host = "http://fangjia.fang.com"
+    data_perpage, data_pages = 60, 50
+    res0, res = [], []
+    for i in range(1, data_pages + 1):
+        res0 += download_data(host + "/pghouse-c0bj/n00-h315-i3" + str(i) + "-j3"+ str(data_perpage) + "/")
+    process_num, pool = 6, []
+    for i in range(process_num):
+        p = multiprocessing.Process(target=worker, args=(q, q1))
+        p.start()
+        pool.append(p)
+    for i in res0:
+        print("putting " + str(i))
+        q.put(i)
+    for i in range(process_num):
+        q.put(None)
+    for i in range(process_num):
+        pool[i].join()
+    while True:
+        try:
+            r = q1.get_nowait()
+            print(r)
+            res.append(r)
+        except:
+            break
+    for l in res:
+        if len(l) != 30:
+            continue
+        for i in [1, 3, 4, 5, 7, 8, 10, 11 ,13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]:
+            r = re.findall(r"[0123456789.:%]+", l[i])
+            l[i] = r[0] if len(r) > 0 else "?"
+        print(l)
+    with open ("Data.txt", "w") as f:
+        for i in res:
+            if len(i) != 30:
+                continue
+            f.write(" ".join(i))
+            f.write("\r\n")
+    print("All Done.")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
